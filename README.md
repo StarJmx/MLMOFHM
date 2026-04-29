@@ -1,5 +1,4 @@
-# Supplementary Materials for "Deciphering the multivariable interactions of MOFs in heavy metal adsorptionvia explainable machine learning for sustainable and resource-efficient
-adsorbent development"
+# Supplementary Materials for "Deciphering the multivariable interactions of MOFs in heavy metal adsorptionvia explainable machine learning..."
 
 This repository contains the data and code supporting the manuscript submitted to **Journal of Cleaner Production** (under review).
 
