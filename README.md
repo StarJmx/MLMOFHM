@@ -1,5 +1,7 @@
 # Supplementary Materials for "Deciphering the multivariable interactions of MOFs in heavy metal adsorption via explainable machine learning..."
 
+<img width="1940" height="783" alt="image" src="https://github.com/user-attachments/assets/3138cbac-9ebf-48f1-af6b-910e608b9f3d" />
+
 This repository contains the data and code supporting the manuscript submitted to **Journal of Cleaner Production** (under review).
 
 ## Contents
