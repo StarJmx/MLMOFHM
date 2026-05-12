@@ -24,6 +24,7 @@ from xgboost import XGBRegressor as xGB
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "final_dataset.xlsx"
 MODEL_PATH = BASE_DIR / "pkl" / "MOFsCrPbCdAs_XGB_Q.pkl"
+GRID_SEARCH_RESULTS_PATH = BASE_DIR / "data" / "grid_search_5cv_results_Q.csv"
 SHEET_NAME = "Sheet_Q"
 
 MODEL_PARAMS = {
@@ -34,12 +35,18 @@ MODEL_PARAMS = {
     "gamma": 0.5,
     "subsample": 0.9,
     "colsample_bytree": 1,
+    "n_jobs": -1,
 }
 
 SHUFFLE_RANDOM_STATE = 53
 TRAIN_SHUFFLE_RANDOM_STATE = 30
 TRAIN_RATIO = 0.9
 SAVE_MODEL = False
+
+# Used to label multiple prediction plots generated from different test subsets.
+PLOT_FIG_COUNTER = -1
+PLOT_FIG_HM = ["full_test","Cr", "Pb", "Cd", "As"]
+PLOT_TITLE_OVERRIDE = None
 
 
 def update_plot_config(font_size):
@@ -109,6 +116,22 @@ def run_grid_search(model, train_x, train_y):
     print(grid_search.best_score_)
     print(grid_search.best_estimator_)
 
+    cv_results = grid_search.cv_results_
+    fold_columns = [f"split{i}_test_score" for i in range(5)]
+    result_rows = []
+    for idx, params in enumerate(cv_results["params"]):
+        row = {}
+        row.update(params)
+        for fold_col in fold_columns:
+            row[fold_col] = cv_results[fold_col][idx]
+        row["mean_test_score"] = cv_results["mean_test_score"][idx]
+        row["std_test_score"] = cv_results["std_test_score"][idx]
+        result_rows.append(row)
+
+    results_df = pd.DataFrame(result_rows)
+    results_df.to_csv(GRID_SEARCH_RESULTS_PATH, index=False, encoding="utf-8-sig")
+    print(f"Grid search 5-fold results saved to: {GRID_SEARCH_RESULTS_PATH}")
+
     return grid_search, full_param_grid
 
 
@@ -116,16 +139,79 @@ def evaluate_model(model, train_x, train_y, test_x, test_y):
     model.fit(train_x, train_y)
 
     pred_train_y = model.predict(train_x)
-    print("训练集MAE：", sm.mean_absolute_error(train_y, pred_train_y))
-    print("训练集RMSE：", np.sqrt(sm.mean_squared_error(train_y, pred_train_y)))
-    print("训练集r2：", sm.r2_score(train_y, pred_train_y))
+    print("Training set MAE: ", sm.mean_absolute_error(train_y, pred_train_y))
+    print("Training set RMSE: ", np.sqrt(sm.mean_squared_error(train_y, pred_train_y)))
+    print("Training set R2: ", sm.r2_score(train_y, pred_train_y))
 
     pred_test_y = model.predict(test_x)
-    print("测试集MAE：", sm.mean_absolute_error(test_y, pred_test_y))
-    print("测试集RMSE：", np.sqrt(sm.mean_squared_error(test_y, pred_test_y)))
-    print("测试集r2：", sm.r2_score(test_y, pred_test_y))
+    print("Test set MAE: ", sm.mean_absolute_error(test_y, pred_test_y))
+    print("Test set RMSE: ", np.sqrt(sm.mean_squared_error(test_y, pred_test_y)))
+    print("Test set R2: ", sm.r2_score(test_y, pred_test_y))
 
     return pred_train_y, pred_test_y
+
+
+def evaluate_model_split_test_by_last_feature(
+    model,
+    train_x,
+    train_y,
+    test_x,
+    test_y,
+):
+    """
+    Split (test_x, test_y) into 4 subtest sets by `test_x` last column:
+      1 -> Cr, 2 -> Pb, 3 -> Cd, 4 -> As
+    Train the model once (same as `evaluate_model`), then evaluate/predict
+    each subtest set and plot 4 prediction figures.
+    """
+    global PLOT_FIG_COUNTER, PLOT_TITLE_OVERRIDE
+
+    model.fit(train_x, train_y)
+
+    pred_train_y = model.predict(train_x)
+    print("Training set MAE: ", sm.mean_absolute_error(train_y, pred_train_y))
+    print("Training set RMSE: ", np.sqrt(sm.mean_squared_error(train_y, pred_train_y)))
+    print("Training set R2: ", sm.r2_score(train_y, pred_train_y))
+
+    pred_test_y_full = model.predict(test_x)
+    metal_col_int = np.round(np.asarray(test_x)[:, -1]).astype(int)
+
+    # Plot full test set (same style as the original `evaluate_model` workflow).
+    PLOT_TITLE_OVERRIDE = None
+    print("Test set MAE: ", sm.mean_absolute_error(test_y, pred_test_y_full))
+    print("Test set RMSE: ", np.sqrt(sm.mean_squared_error(test_y, pred_test_y_full)))
+    print("Test set R2: ", sm.r2_score(test_y, pred_test_y_full))
+    plot_prediction_results(train_y, pred_train_y, test_y, pred_test_y_full)
+
+    code_to_title = {
+        1: "(a)Cr",
+        2: "(b)Pb",
+        3: "(c)Cd",
+        4: "(d)As",
+    }
+
+    # Return as 4 groups: (pred_train_y, pred_test_y_xxx)
+    groups = []
+    for code in [1, 2, 3, 4]:
+        mask = metal_col_int == code
+        test_y_sub = np.asarray(test_y)[mask]
+        pred_test_y_sub = pred_test_y_full[mask]
+
+        print(f"Sub-test set ({code_to_title.get(code, code)}):")
+        if test_y_sub.size == 0:
+            print("  (empty) skip metrics & plot")
+            groups.append((pred_train_y, pred_test_y_sub))
+            continue
+
+        print("  MAE: ", sm.mean_absolute_error(test_y_sub, pred_test_y_sub))
+        print("  RMSE: ", np.sqrt(sm.mean_squared_error(test_y_sub, pred_test_y_sub)))
+        print("  R2: ", sm.r2_score(test_y_sub, pred_test_y_sub))
+
+        PLOT_TITLE_OVERRIDE = code_to_title.get(code, f"Code{code}")
+        plot_prediction_results(train_y, pred_train_y, test_y_sub, pred_test_y_sub)
+        groups.append((pred_train_y, pred_test_y_sub))
+
+    return tuple(groups)
 
 
 def save_model(model):
@@ -142,16 +228,26 @@ def load_model():
 
 
 def plot_prediction_results(train_y, pred_train_y, test_y, pred_test_y):
-    mp.figure("XGB", figsize=(1.8, 1.6), facecolor="white", dpi=200)
+    global PLOT_FIG_COUNTER, PLOT_TITLE_OVERRIDE
+
+    PLOT_FIG_COUNTER += 1
+    fig_name = f"XGB_Q_pred_{PLOT_FIG_HM[PLOT_FIG_COUNTER]}"
+    plot_title = PLOT_TITLE_OVERRIDE if PLOT_TITLE_OVERRIDE is not None else "(a)MQ"
+
+    mp.figure(fig_name, figsize=(1.8, 1.6), facecolor="white", dpi=600)
     update_plot_config(font_size=8)
-    mp.title("(a)MQ", fontsize=8)
+    mp.title(plot_title, fontsize=8)
     mp.xlim(0, 800)
     mp.ylim(0, 800)
     mp.grid(linestyle="")
 
-    mp.text(420, 150, r"R$^2$=0.95")
-    mp.text(420, 90, r"MAE=12.71")
-    mp.text(420, 30, r"RMSE=36.61")
+    if len(test_y) > 0:
+        r2_test = sm.r2_score(test_y, pred_test_y)
+        mae_test = sm.mean_absolute_error(test_y, pred_test_y)
+        rmse_test = np.sqrt(sm.mean_squared_error(test_y, pred_test_y))
+        mp.text(420, 150, rf"R$^2$={r2_test:.2f}")
+        mp.text(420, 90, rf"MAE={mae_test:.2f}")
+        mp.text(420, 30, rf"RMSE={rmse_test:.2f}")
     mp.xlabel("Predicted Q(mg/g)")
     mp.ylabel("Actual Q(mg/g)")
 
@@ -308,7 +404,7 @@ def main():
 
     # Keep the same workflow as the original script:
     # first train/evaluate, then load the previously saved model for plotting.
-    pred_train_y, pred_test_y = evaluate_model(model, train_x, train_y, test_x, test_y)
+    _ = evaluate_model_split_test_by_last_feature(model, train_x, train_y, test_x, test_y)
 
     # Original optional model-saving block:
     # with open('pkl/MOFsCrPbCdAs_XGB_Q.pkl', 'wb') as f:
@@ -317,11 +413,10 @@ def main():
     if SAVE_MODEL:
         save_model(model)
 
-    # 评估性能和基于树的特征重要性
-    plot_prediction_results(train_y, pred_train_y, test_y, pred_test_y)
+    # Evaluate performance and tree-based feature importance (prediction plots already generated in sub-test set function)
     plot_feature_importance(model, feature_names)
 
-    # 加载最终的保存的模型进行全局分析
+    # Load the final saved model for global analysis
     model = load_model()
 
     x_full, y_full, all_columns = reload_full_dataset()
