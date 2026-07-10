@@ -4,3 +4,5 @@
 __pycache__/
 # 3. Ignore all .pyc files
 *.pyc
+final_dataset.xlsx
+original label encoded.xlsx
